@@ -26,9 +26,6 @@ services:
     pull_policy: always
     pids_limit: 2048
     stop_grace_period: 90s
-    extra_hosts:
-      # Hairpin: in-container lookups of the public hostname hit Coolify's proxy.
-      - "${SERVICE_FQDN_PAPERCLIP_3100}:host-gateway"
     environment:
       HOST: "0.0.0.0"
       PORT: "3100"
@@ -37,9 +34,9 @@ services:
 
       # Coolify generates an HTTPS URL and routes it to container port 3100.
       # Leave the SERVICE_URL value empty so PAPERCLIP_PUBLIC_URL is the origin,
-      # not a lone "/".
+      # not a lone "/". Do not put SERVICE_FQDN_* into extra_hosts: Coolify
+      # turns the port suffix into add-host "3100:host-gateway" and Docker fails.
       SERVICE_URL_PAPERCLIP_3100: ""
-      SERVICE_FQDN_PAPERCLIP_3100: ""
       PAPERCLIP_PUBLIC_URL: ${SERVICE_URL_PAPERCLIP_3100}
       # Codex/ChatGPT in this container must not call the public HTTPS domain
       # (hairpin NAT / sandbox allowlist). Use the process listen address.
