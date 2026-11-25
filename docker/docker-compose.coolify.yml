@@ -6,6 +6,10 @@
 #   Image: ghcr.io/paperclipai/paperclip:latest  (stable channel)
 #   Alternatives: :beta  :nightly  :canary  :YYYY.MDD.P  :sha-<short-sha>
 #
+# Fork overlay: this file is restored by .github/workflows/sync-upstream.yml
+# after merging paperclipai/paperclip. Do not use GitHub "Sync fork → Discard
+# commits"; that deletes this file and breaks Coolify.
+#
 # Coolify setup:
 #   1. Resource type Docker Compose, compose path docker/docker-compose.coolify.yml
 #   2. Leave Raw compose mode off so Coolify can attach its proxy and domain

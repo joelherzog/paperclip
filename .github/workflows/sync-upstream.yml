@@ -1,0 +1,125 @@
+# Fork-only: merge paperclipai/paperclip master into this fork without wiping
+# Coolify overlay files. Never hard-reset master. Never force-push master.
+#
+# Overlay files (restored after every merge):
+#   - docker/docker-compose.coolify.yml
+#   - .github/workflows/sync-upstream.yml
+#
+# Add another path to OVERLAY_FILES below if you create more fork-only files.
+# Do not put files here that should follow upstream.
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Merge paperclipai/paperclip master
+    if: github.repository_owner != 'paperclipai'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      OVERLAY_FILES: |
+        docker/docker-compose.coolify.yml
+        .github/workflows/sync-upstream.yml
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Merge upstream and keep overlay files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git remote add upstream https://github.com/paperclipai/paperclip.git 2>/dev/null \
+            || git remote set-url upstream https://github.com/paperclipai/paperclip.git
+          git fetch origin master
+          git fetch upstream master
+
+          overlay_dir="$(mktemp -d)"
+          while IFS= read -r path; do
+            [ -z "$path" ] && continue
+            if [ -f "$path" ]; then
+              mkdir -p "$overlay_dir/$(dirname "$path")"
+              cp "$path" "$overlay_dir/$path"
+            fi
+          done <<< "$OVERLAY_FILES"
+
+          git checkout -B sync/upstream origin/master
+
+          if git merge-base --is-ancestor upstream/master HEAD; then
+            echo "master already contains upstream/master"
+            exit 0
+          fi
+
+          # Prefer upstream on shared-file conflicts, then put overlay files back.
+          if ! git merge --no-ff -X theirs --no-edit upstream/master; then
+            echo "Merge had remaining conflicts. Restoring overlay files, taking upstream for the rest."
+            git diff --name-only --diff-filter=U | while IFS= read -r path; do
+              [ -z "$path" ] && continue
+              git checkout --theirs -- "$path" 2>/dev/null || git rm -f -- "$path" || true
+              git add -- "$path" 2>/dev/null || true
+            done
+          fi
+
+          while IFS= read -r path; do
+            [ -z "$path" ] && continue
+            if [ -f "$overlay_dir/$path" ]; then
+              mkdir -p "$(dirname "$path")"
+              cp "$overlay_dir/$path" "$path"
+              git add -- "$path"
+            fi
+          done <<< "$OVERLAY_FILES"
+
+          if [ -f .git/MERGE_HEAD ]; then
+            git add -A
+            git commit --no-edit
+          elif ! git diff --cached --quiet; then
+            git commit -m "Keep fork overlay files after upstream sync"
+          fi
+
+          if git diff --quiet origin/master HEAD; then
+            echo "No changes to open as a pull request"
+            exit 0
+          fi
+
+          git push --force-with-lease origin sync/upstream
+
+          if gh pr view sync/upstream --json number --jq .number >/dev/null 2>&1; then
+            echo "Updated existing sync pull request"
+            exit 0
+          fi
+
+          gh pr create \
+            --base master \
+            --head sync/upstream \
+            --title "Sync upstream/master (keep Coolify overlay)" \
+            --body "$(cat <<'EOF'
+          Merges `paperclipai/paperclip` `master` into this fork.
+
+          Overlay files are restored after the merge so Coolify keeps working:
+
+          - `docker/docker-compose.coolify.yml`
+          - `.github/workflows/sync-upstream.yml`
+
+          Review, then merge. Do not use GitHub **Sync fork → Discard commits**; that would delete the overlay.
+          EOF
+          )"
