@@ -1,0 +1,59 @@
+# Coolify: pull the GitHub-built image. Do not add a `build:` key.
+#
+# Paperclip publishes this image from GitHub Actions to GHCR. Coolify only
+# pulls it; the server never compiles Node, Rust, or the provider pack.
+#
+#   Image: ghcr.io/paperclipai/paperclip:latest  (stable channel)
+#   Alternatives: :beta  :nightly  :canary  :YYYY.MDD.P  :sha-<short-sha>
+#
+# Coolify setup:
+#   1. Resource type Docker Compose, compose path docker/docker-compose.coolify.yml
+#   2. Leave Raw compose mode off so Coolify can attach its proxy and domain
+#   3. Set a wildcard domain on the Coolify server
+#   4. Put LLM API keys in the resource Environment Variables, not in this file
+#   5. After the first healthy boot, sign in and choose "Claim this instance"
+#
+# No published `ports:`: Coolify's proxy routes the generated domain to 3100.
+# Do not set `container_name`.
+#
+services:
+  paperclip:
+    image: ghcr.io/paperclipai/paperclip:latest
+    pull_policy: always
+    pids_limit: 2048
+    stop_grace_period: 90s
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "3100"
+      SERVE_UI: "true"
+      PAPERCLIP_HOME: "/paperclip"
+
+      # Coolify generates an HTTPS URL and routes it to container port 3100.
+      SERVICE_URL_PAPERCLIP_3100: /
+      PAPERCLIP_PUBLIC_URL: ${SERVICE_URL_PAPERCLIP_3100}
+
+      # authenticated/private keeps browser first-admin claim. public would
+      # require `paperclipai auth bootstrap-ceo` inside the container.
+      PAPERCLIP_DEPLOYMENT_MODE: authenticated
+      PAPERCLIP_DEPLOYMENT_EXPOSURE: private
+
+      # Coolify terminates TLS one hop in front of this container.
+      TRUST_PROXY: "1"
+
+      # Generated once by Coolify and reused on redeploys (64 hex chars).
+      BETTER_AUTH_SECRET: ${SERVICE_HEX_64_AUTHSECRET}
+      PAPERCLIP_TOOL_ACTION_SIGNING_SECRET: ${SERVICE_HEX_64_TOOLSECRET}
+
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - paperclip-data:/paperclip
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:3100/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
+
+volumes:
+  paperclip-data:
